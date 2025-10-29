@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import DailyView from './components/ShiftForm';
 import Configuration from './components/config/Configuration';
 import Dashboard from './components/dashboard/Dashboard';
-import { FuelPrices, Attendant, Tank, Pump, OtherProduct, ShiftData } from './types';
+import { FuelPrices, Attendant, Tank, Pump, OtherProduct, ShiftData, PumpReading } from './types';
 import * as dataService from './services/dataService';
 
 type View = 'form' | 'config' | 'dashboard';
@@ -31,7 +31,40 @@ function App() {
   useEffect(() => { dataService.saveOtherProducts(otherProducts); }, [otherProducts]);
   useEffect(() => { dataService.saveShifts(allShifts); }, [allShifts]);
   
-  const getPreviousDayLastReadings = (date: string): Pump[] => {
+  // Effect to synchronize shifts with pump configuration changes
+  useEffect(() => {
+    setAllShifts(prevAllShifts => {
+        const needsUpdate = prevAllShifts.some(shift => {
+            if (shift.status !== 'open') return false;
+            const pumpIdsInShift = new Set(shift.pumpReadings.map(r => r.pumpId));
+            return pumps.length !== pumpIdsInShift.size || !pumps.every(p => pumpIdsInShift.has(p.id));
+        });
+
+        if (!needsUpdate) {
+            return prevAllShifts;
+        }
+
+        return prevAllShifts.map(shift => {
+            if (shift.status !== 'open') {
+                return shift;
+            }
+            
+            const updatedReadings = pumps.map(pump => {
+                const existingReading = shift.pumpReadings.find(r => r.pumpId === pump.id);
+                return existingReading || {
+                    pumpId: pump.id,
+                    startIndex: 0,
+                    endIndex: 0,
+                    testVolume: 0,
+                };
+            });
+            
+            return { ...shift, pumpReadings: updatedReadings };
+        });
+    });
+  }, [pumps]);
+
+  const getPreviousDayLastReadings = (date: string): { pumpId: number; endIndex: number }[] => {
     const prevDate = new Date(date);
     prevDate.setDate(prevDate.getDate() - 1);
     const prevDateStr = prevDate.toISOString().split('T')[0];
@@ -41,7 +74,7 @@ function App() {
       .pop();
 
     if (lastShiftOfPrevDay) {
-        return lastShiftOfPrevDay.pumpReadings.map(r => ({ ...pumps.find(p=>p.id === r.pumpId)!, endIndex: r.endIndex } as any));
+        return lastShiftOfPrevDay.pumpReadings.map(r => ({ pumpId: r.pumpId, endIndex: r.endIndex }));
     }
     return [];
   };
@@ -59,14 +92,15 @@ function App() {
             date: currentDate,
             shift: shiftName,
             attendantId: '',
-            pumpReadings: pumps.map(p => ({
-                pumpId: p.id,
-                startIndex: shiftName === 'Shift 1' 
-                    ? (lastReadings.find(lr => lr.id === p.id) as any)?.endIndex || 0 
-                    : 0,
-                endIndex: 0,
-                testVolume: 0,
-            })),
+            pumpReadings: pumps.map(p => {
+                const prevReading = lastReadings.find(lr => lr.pumpId === p.id);
+                return {
+                    pumpId: p.id,
+                    startIndex: shiftName === 'Shift 1' ? (prevReading?.endIndex || 0) : 0,
+                    endIndex: 0,
+                    testVolume: 0,
+                }
+            }),
             payments: { cash: 0, checks: 0, stateVoucher: 0, tpe: 0, ocard: 0, credit: 0 },
             otherSales: [],
             tankUpdates: [],
