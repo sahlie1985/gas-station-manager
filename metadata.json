@@ -1,0 +1,5 @@
+{
+  "name": "Gas Station Daily Sales Manager",
+  "description": "A web application for gas station managers to track daily fuel sales, revenue, and inventory by shift, replacing traditional Excel-based systems with a centralized digital solution.",
+  "requestFramePermissions": []
+}
